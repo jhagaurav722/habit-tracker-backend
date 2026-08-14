@@ -17,6 +17,57 @@ app.get('/api/health', (req, res) => {
 
 const bcrypt = require('bcrypt');
 
+const jwt = require('jsonwebtoken');
+
+// POST login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    if (!passwordMatches) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const token = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ token });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // "Bearer <token>"
+
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.userId = decoded.userId;
+    next();
+  });
+}
+
 // POST signup
 app.post('/api/auth/signup', async (req, res) => {
   try {
@@ -48,11 +99,11 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// GET all habits
-app.get('/api/habits', async (req, res) => {
+//Get all habits
+app.get('/api/habits', authenticateToken, async (req, res) => {
   try {
     const habits = await prisma.habit.findMany({
-      where: { userId: 1, isActive: true }
+      where: { userId: req.userId, isActive: true }
     });
     res.json(habits);
   } catch (error) {
@@ -61,13 +112,13 @@ app.get('/api/habits', async (req, res) => {
   }
 });
 
-// POST create a habit
-app.post('/api/habits', async (req, res) => {
+//Post a habit
+app.post('/api/habits', authenticateToken, async (req, res) => {
   try {
     const { name, frequency, targetPerWeek } = req.body;
     const habit = await prisma.habit.create({
       data: {
-        userId: 1,
+        userId: req.userId,
         name,
         frequency,
         targetPerWeek: targetPerWeek || null
@@ -81,7 +132,7 @@ app.post('/api/habits', async (req, res) => {
 });
 
 // GET a single habit
-app.get('/api/habits/:id', async (req, res) => {
+app.get('/api/habits/:id', authenticateToken, async (req, res) => {
   try {
     const habit = await prisma.habit.findUnique({
       where: { id: parseInt(req.params.id) }
@@ -95,7 +146,7 @@ app.get('/api/habits/:id', async (req, res) => {
 });
 
 // PUT update a habit
-app.put('/api/habits/:id', async (req, res) => {
+app.put('/api/habits/:id',authenticateToken, async (req, res) => {
   try {
     const { name, frequency, targetPerWeek } = req.body;
     const habit = await prisma.habit.update({
@@ -117,7 +168,7 @@ app.put('/api/habits/:id', async (req, res) => {
 });
 
 // DELETE (soft delete) a habit
-app.delete('/api/habits/:id', async (req, res) => {
+app.delete('/api/habits/:id', authenticateToken, async (req, res) => {
   try {
     await prisma.habit.update({
       where: { id: parseInt(req.params.id) },
