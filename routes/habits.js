@@ -64,6 +64,54 @@ module.exports = function (prisma) {
     }
   });
 
+  router.post('/:id/complete', authenticateToken, async (req, res) => {
+  try {
+    // Confirm the habit exists AND belongs to this user
+    const habit = await prisma.habit.findFirst({
+      where: { id: parseInt(req.params.id), userId: req.userId }
+    });
+    if (!habit) return res.status(404).json({ error: 'Habit not found' });
+
+    // Use today's date, with time zeroed out (date-only, matching @db.Date)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const completion = await prisma.completion.create({
+      data: {
+        habitId: habit.id,
+        completedDate: today
+      }
+    });
+
+    res.status(201).json(completion);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Habit already completed today' });
+    }
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+router.get('/:id/completions', authenticateToken, async (req, res) => {
+  try {
+    const habit = await prisma.habit.findFirst({
+      where: { id: parseInt(req.params.id), userId: req.userId }
+    });
+    if (!habit) return res.status(404).json({ error: 'Habit not found' });
+
+    const completions = await prisma.completion.findMany({
+      where: { habitId: habit.id },
+      orderBy: { completedDate: 'desc' }
+    });
+
+    res.json(completions);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
   router.delete('/:id', authenticateToken, async (req, res) => {
     try {
       const existing = await prisma.habit.findFirst({
